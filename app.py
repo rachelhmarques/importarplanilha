@@ -24,7 +24,7 @@ except ModuleNotFoundError:
     st.error("The 'openpyxl' module is not installed. Excel file generation will fail. Please ensure 'openpyxl' is included in your requirements.txt file.")
 
 st.title("Ajuste de Planilhas Conta Azul")
-st.markdown("Faça o Upload do arquivo (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) para gerar os arquivos separados.")
+st.markdown("Faça o upload do arquivo (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) para gerar os arquivos separados.")
 
 # File uploader
 uploaded_file = st.file_uploader("Selecione o arquivo de Excel", type=["xlsx"])
@@ -177,10 +177,10 @@ if uploaded_file is not None:
                     file_name=output_file_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-                st.success(f"Gerado o arquivo do Disponível: {disponivel}")
+                st.success(f"Arquivo pronto: {disponivel}")
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
 
 st.markdown("---")
-st.markdown("Built with Streamlit. Deployed via GitHub.")
+st.markdown("Deus é bom o tempo todo. o tempo todo Deus é bom!")
