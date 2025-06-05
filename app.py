@@ -140,7 +140,7 @@ if uploaded_file is not None:
                     'Categoria': filtered_df.iloc[:, 3],
                     'Descrição': filtered_df.apply(lambda row: row.iloc[5] if not pd.isna(row.iloc[5]) else row['Detalhe'], axis=1),
                     'Cliente/Fornecedor': None,
-                    'CNPJ/CPF': None,
+                    'CNPJ/CPF Cliente/Fornecedor': None,
                     'Centro de Custo': None,
                     'Observações': None
                 })
