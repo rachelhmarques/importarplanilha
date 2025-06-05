@@ -1,4 +1,4 @@
-```python
+
 import streamlit as st
 import pandas as pd
 import io
@@ -179,4 +179,4 @@ if uploaded_file is not None:
 
 st.markdown("---")
 st.markdown("Built with Streamlit. Deployed via GitHub.")
-```
+
