@@ -177,7 +177,7 @@ if uploaded_file is not None:
                     file_name=output_file_name,
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
-                st.success(f"Generated file for Disponível: {disponivel}")
+                st.success(f"Gerado o arquivo do Disponível: {disponivel}")
 
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
