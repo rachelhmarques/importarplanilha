@@ -23,11 +23,11 @@ try:
 except ModuleNotFoundError:
     st.error("The 'openpyxl' module is not installed. Excel file generation will fail. Please ensure 'openpyxl' is included in your requirements.txt file.")
 
-st.title("Economatos Excel Processor")
-st.markdown("Upload the Excel file (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) to generate separate files for each Disponível.")
+st.title("Ajuste de Planilhas Conta Azul")
+st.markdown("Faça o Upload do arquivo (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) para gerar os arquivos separados.")
 
 # File uploader
-uploaded_file = st.file_uploader("Choose the Excel file", type=["xlsx"])
+uploaded_file = st.file_uploader("Selecione o arquivo de Excel", type=["xlsx"])
 
 if uploaded_file is not None:
     if not openpyxl_available:
@@ -35,7 +35,7 @@ if uploaded_file is not None:
         st.stop()
 
     try:
-        with st.spinner("Processing file..."):
+        with st.spinner("Calma....."):
             # Read the uploaded Excel file
             excel_data = pd.ExcelFile(uploaded_file)
 
