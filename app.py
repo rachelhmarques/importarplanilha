@@ -183,4 +183,4 @@ if uploaded_file is not None:
         st.error(f"An error occurred: {str(e)}")
 
 st.markdown("---")
-st.markdown("Deus é bom o tempo todo. o tempo todo Deus é bom!")
+st.markdown("Deus é bom o tempo todo. O tempo todo Deus é bom!")
