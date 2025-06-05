@@ -35,7 +35,7 @@ if uploaded_file is not None:
         st.stop()
 
     try:
-        with st.spinner("Calma....."):
+        with st.spinner("Calma.....Reza uma Ave Maria!"):
             # Read the uploaded Excel file
             excel_data = pd.ExcelFile(uploaded_file)
 
