@@ -1,4 +1,4 @@
-
+```python
 import streamlit as st
 import pandas as pd
 import io
@@ -7,17 +7,20 @@ from datetime import datetime
 
 # Attempt to import required modules
 try:
-    from fuzzywuzzy import fuzz
-except ModuleNotFoundError:
-    st.error("The 'fuzzywuzzy' module is not installed. Please ensure 'fuzzywuzzy' and 'python-Levenshtein' are included in your requirements.txt file.")
-    st.stop()
-
-try:
     from openpyxl import Workbook
     from openpyxl.styles import numbers
 except ModuleNotFoundError:
     st.error("The 'openpyxl' module is not installed. Please ensure 'openpyxl' is included in your requirements.txt file.")
     st.stop()
+
+# Handle fuzzywuzzy import with fallback
+fuzzy_available = False
+try:
+    from fuzzywuzzy import fuzz
+    fuzzy_available = True
+    st.info("Fuzzywuzzy module loaded successfully.")
+except ModuleNotFoundError:
+    st.warning("The 'fuzzywuzzy' module is not installed. Falling back to exact string matching for 'Detalhe' column. For full functionality, ensure 'fuzzywuzzy' and 'python-Levenshtein' are in requirements.txt.")
 
 st.title("Economatos Excel Processor")
 st.markdown("Upload the Excel file (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) to generate separate files for each Disponível.")
@@ -35,10 +38,21 @@ if uploaded_file is not None:
             base_df = pd.read_excel(excel_data, sheet_name='Planilha1', skiprows=8)
             pagina1_df = pd.read_excel(excel_data, sheet_name='Página1', skiprows=4)
 
-            # Function to find the best match using fuzzy string matching
+            # Function to find the best match
             def find_best_match(description, pagina1_descriptions):
                 if pd.isna(description):
                     return None
+                if not fuzzy_available:
+                    # Fallback to exact matching
+                    clean_description = description.strip()
+                    for pagina1_desc in pagina1_descriptions:
+                        if pd.isna(pagina1_desc):
+                            continue
+                        clean_pagina1_desc = pagina1_desc.split(' - ', 1)[-1].strip() if ' - ' in pagina1_desc else pagina1_desc.strip()
+                        if clean_description.lower() == clean_pagina1_desc.lower():
+                            return pagina1_desc
+                    return None
+                # Fuzzy matching
                 best_match = None
                 highest_score = 0
                 clean_description = description.strip()
@@ -165,3 +179,4 @@ if uploaded_file is not None:
 
 st.markdown("---")
 st.markdown("Built with Streamlit. Deployed via GitHub.")
+```
