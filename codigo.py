@@ -1,142 +1,152 @@
 
-# Install required packages
-!pip install fuzzywuzzy python-Levenshtein pandas openpyxl
-
+import streamlit as st
 import pandas as pd
-from google.colab import files
 from fuzzywuzzy import fuzz
 import io
+import re
 from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import numbers
-import re
 
-# Prompt user to upload the Excel file
-print("Please upload the Excel file (Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx):")
-uploaded = files.upload()
+st.title("Economatos Excel Processor")
+st.markdown("Upload the Excel file (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) to generate separate files for each Disponível.")
 
-try:
-    # Read the uploaded Excel file
-    file_name = list(uploaded.keys())[0]
-    excel_data = pd.ExcelFile(io.BytesIO(uploaded[file_name]))
+# File uploader
+uploaded_file = st.file_uploader("Choose the Excel file", type=["xlsx"])
 
-    # Load the sheets
-    # Skip 8 rows to start from row 9 (0-based index) in Planilha1, as row 10 is the first data row
-    base_df = pd.read_excel(excel_data, sheet_name='Planilha1', skiprows=8)
-    # Skip 4 rows in Página1 to start from row 5
-    pagina1_df = pd.read_excel(excel_data, sheet_name='Página1', skiprows=4)
+if uploaded_file is not None:
+    try:
+        with st.spinner("Processing file..."):
+            # Read the uploaded Excel file
+            excel_data = pd.ExcelFile(uploaded_file)
 
-    # Function to find the best match using fuzzy string matching
-    def find_best_match(description, pagina1_descriptions):
-        if pd.isna(description):
-            return None
-        best_match = None
-        highest_score = 0
-        clean_description = description.strip()
-        for pagina1_desc in pagina1_descriptions:
-            if pd.isna(pagina1_desc):
-                continue
-            # Remove leading code for comparison, but preserve original for output
-            clean_pagina1_desc = pagina1_desc.split(' - ', 1)[-1].strip() if ' - ' in pagina1_desc else pagina1_desc.strip()
-            # Use token_sort_ratio for complex descriptions, partial_ratio for short ones
-            score = fuzz.token_sort_ratio(clean_description, clean_pagina1_desc) if len(clean_description) > 20 or ',' in clean_description else fuzz.partial_ratio(clean_description, clean_pagina1_desc)
-            # Adjust threshold: stricter for short descriptions, more lenient for complex ones
-            threshold = 85 if len(clean_description) < 20 else 75
-            if score > highest_score and score >= threshold:
-                highest_score = score
-                best_match = pagina1_desc  # Use original Página1 description
-        return best_match
+            # Load the sheets
+            base_df = pd.read_excel(excel_data, sheet_name='Planilha1', skiprows=8)
+            pagina1_df = pd.read_excel(excel_data, sheet_name='Página1', skiprows=4)
 
-    # Ensure 'Detalhe' column exists in Planilha1
-    if 'Detalhe' not in base_df.columns:
-        raise ValueError("Column 'Detalhe' not found in Planilha1")
+            # Function to find the best match using fuzzy string matching
+            def find_best_match(description, pagina1_descriptions):
+                if pd.isna(description):
+                    return None
+                best_match = None
+                highest_score = 0
+                clean_description = description.strip()
+                for pagina1_desc in pagina1_descriptions:
+                    if pd.isna(pagina1_desc):
+                        continue
+                    clean_pagina1_desc = pagina1_desc.split(' - ', 1)[-1].strip() if ' - ' in pagina1_desc else pagina1_desc.strip()
+                    score = fuzz.token_sort_ratio(clean_description, clean_pagina1_desc) if len(clean_description) > 20 or ',' in clean_description else fuzz.partial_ratio(clean_description, clean_pagina1_desc)
+                    threshold = 85 if len(clean_description) < 20 else 75
+                    if score > highest_score and score >= threshold:
+                        highest_score = score
+                        best_match = pagina1_desc
+                return best_match
 
-    # Use Column B (index 1) in Página1 for descriptions
-    if len(pagina1_df.columns) < 2:
-        raise ValueError("Column B not found in Página1")
-    pagina1_descriptions = pagina1_df.iloc[:, 1]  # Column B
+            # Ensure 'Detalhe' column exists
+            if 'Detalhe' not in base_df.columns:
+                st.error("Column 'Detalhe' not found in Planilha1")
+                st.stop()
 
-    # Filter out unwanted entries
-    unwanted = ['Transferência entre Disponíveis - Saída', 'Transferência entre Disponíveis - Entrada', 'Saldo Inicial']
-    base_df = base_df[~base_df['Detalhe'].isin(unwanted)]
+            # Use Column B (index 1) in Página1 for descriptions
+            if len(pagina1_df.columns) < 2:
+                st.error("Column B not found in Página1")
+                st.stop()
+            pagina1_descriptions = pagina1_df.iloc[:, 1]
 
-    # Process the 'Detalhe' column
-    updated_descriptions = base_df['Detalhe'].copy()
-    for i in range(len(base_df)):
-        desc = base_df['Detalhe'].iloc[i]
-        best_match = find_best_match(desc, pagina1_descriptions)
-        if best_match:
-            updated_descriptions.iloc[i] = best_match  # Use exact match from Página1
+            # Filter out unwanted entries
+            unwanted = ['Transferência entre Disponíveis - Saída', 'Transferência entre Disponíveis - Entrada', 'Saldo Inicial']
+            base_df = base_df[~base_df['Detalhe'].isin(unwanted)]
 
-    # Update the 'Detalhe' column
-    base_df['Detalhe'] = updated_descriptions
+            # Process the 'Detalhe' column
+            updated_descriptions = base_df['Detalhe'].copy()
+            for i in range(len(base_df)):
+                desc = base_df['Detalhe'].iloc[i]
+                best_match = find_best_match(desc, pagina1_descriptions)
+                if best_match:
+                    updated_descriptions.iloc[i] = best_match
 
-    # Function to format dates to DD/MM/YYYY
-    def format_date(value):
-        if pd.isna(value):
-            return value
-        try:
-            # Convert to datetime, handling various formats
-            date_val = pd.to_datetime(value, errors='coerce')
-            if pd.isna(date_val):
-                return value  # Return original if not a valid date
-            return date_val.strftime('%d/%m/%Y')
-        except (ValueError, TypeError):
-            return value  # Return original if conversion fails
+            # Update the 'Detalhe' column
+            base_df['Detalhe'] = updated_descriptions
 
-    # Get unique values in Column C (index 2, assumed to be Centro de Custo/Disponível)
-    if len(base_df.columns) < 3:
-        raise ValueError("Column C (Disponível) not found in Planilha1")
-    unique_disponiveis = base_df.iloc[:, 2].dropna().unique()
+            # Function to format dates to DD/MM/YYYY
+            def format_date(value):
+                if pd.isna(value):
+                    return value
+                try:
+                    date_val = pd.to_datetime(value, errors='coerce')
+                    if pd.isna(date_val):
+                        return value
+                    return date_val.strftime('%d/%m/%Y')
+                except (ValueError, TypeError):
+                    return value
 
-    # Generate a separate file for each unique Disponível
-    for disponivel in unique_disponiveis:
-        # Filter rows for the current Disponível
-        filtered_df = base_df[base_df.iloc[:, 2] == disponivel]
+            # Get unique values in Column C (index 2, Disponível)
+            if len(base_df.columns) < 3:
+                st.error("Column C (Disponível) not found in Planilha1")
+                st.stop()
+            
+            disponivel_column = base_df.iloc[:, 2].fillna('Unknown')
+            unique_disponiveis = disponivel_column[disponivel_column.str.strip() != ''].unique()
+            st.write("Detected unique Disponíveis:", list(unique_disponiveis))
 
-        # Create new DataFrame for the "Dados" sheet
-        output_df = pd.DataFrame({
-            'Data de Competência': filtered_df.iloc[:, 1],  # Column B (dates)
-            'Data de Vencimento': filtered_df.iloc[:, 1],  # Column B (dates)
-            'Data de Pagamento': filtered_df.iloc[:, 1],  # Column B (dates)
-            'Valor': filtered_df.iloc[:, 9],  # Column J
-            'Categoria': filtered_df.iloc[:, 3],  # Column D
-            'Descrição': filtered_df.apply(lambda row: row.iloc[5] if not pd.isna(row.iloc[5]) else row['Detalhe'], axis=1),  # Column F, fallback to Column D
-            'Cliente/Fornecedor': None,  # Blank
-            'CNPJ/CPF Cliente/Fornecedor': None,  # Blank
-            'Centro de Custo': None,  # Blank
-            'Observações': None  # Blank
-        })
+            # Generate files for each Disponível
+            for disponivel in unique_disponiveis:
+                filtered_df = base_df[base_df.iloc[:, 2].fillna('Unknown') == disponivel]
+                
+                if filtered_df.empty:
+                    st.warning(f"No data found for Disponível: {disponivel}, skipping file generation")
+                    continue
 
-        # Format dates in Columns A, B, C to DD/MM/YYYY
-        for col in ['Data de Competência', 'Data de Vencimento', 'Data de Pagamento']:
-            output_df[col] = output_df[col].apply(format_date)
+                # Create output DataFrame
+                output_df = pd.DataFrame({
+                    'Data de Competência': filtered_df.iloc[:, 1],
+                    'Data de Vencimento': filtered_df.iloc[:, 1],
+                    'Data de Pagamento': filtered_df.iloc[:, 1],
+                    'Valor': filtered_df.iloc[:, 9],
+                    'Categoria': filtered_df.iloc[:, 3],
+                    'Descrição': filtered_df.apply(lambda row: row.iloc[5] if not pd.isna(row.iloc[5]) else row['Detalhe'], axis=1),
+                    'Cliente/Fornecedor': None,
+                    'CNPJ/CPF Cliente/Fornecedor': None,
+                    'Centro de Custo': None,
+                    'Observações': None
+                })
 
-        # Sanitize the Disponível name for use as a filename
-        safe_disponivel = re.sub(r'[<>:"/\\|?*]', '_', str(disponivel))
-        output_file = f'{safe_disponivel}.xlsx'
+                # Format dates
+                for col in ['Data de Competência', 'Data de Vencimento', 'Data de Pagamento']:
+                    output_df[col] = output_df[col].apply(format_date)
 
-        # Save the DataFrame to a new Excel file with only the "Dados" sheet
-        with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-            output_df.to_excel(writer, sheet_name='Dados', index=False)
+                # Sanitize filename
+                safe_disponivel = re.sub(r'[<>:"/\\|?*]', '_', str(disponivel))
+                output_file_name = f'{safe_disponivel}.xlsx'
 
-            # Access the openpyxl workbook and worksheet
-            workbook = writer.book
-            worksheet = writer.sheets['Dados']
+                # Save to BytesIO buffer
+                output_buffer = io.BytesIO()
+                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                    output_df.to_excel(writer, sheet_name='Dados', index=False)
+                    workbook = writer.book
+                    worksheet = writer.sheets['Dados']
+                    for col in ['A', 'B', 'C']:
+                        for row in range(2, len(output_df) + 2):
+                            cell = worksheet[f'{col}{row}']
+                            if cell.value and isinstance(cell.value, str) and '/' in cell.value:
+                                cell.number_format = 'DD/MM/YYYY'
+                            elif cell.value and isinstance(cell.value, (pd.Timestamp, datetime)):
+                                cell.value = cell.value.strftime('%d/%m/%Y')
+                                cell.number_format = 'DD/MM/YYYY'
 
-            # Apply DD/MM/YYYY format to Columns A, B, C (Excel columns 1, 2, 3)
-            for col in ['A', 'B', 'C']:
-                for row in range(2, len(output_df) + 2):  # Start from row 2 (Excel is 1-based, plus header)
-                    cell = worksheet[f'{col}{row}']
-                    if cell.value and isinstance(cell.value, str) and '/' in cell.value:
-                        cell.number_format = 'DD/MM/YYYY'
-                    elif cell.value and isinstance(cell.value, (pd.Timestamp, datetime)):
-                        cell.value = cell.value.strftime('%d/%m/%Y')
-                        cell.number_format = 'DD/MM/YYYY'
+                output_buffer.seek(0)
 
-        # Download the file
-        files.download(output_file)
-        print(f"File saved and downloaded as {output_file}")
+                # Provide download button
+                st.download_button(
+                    label=f"Download {output_file_name}",
+                    data=output_buffer,
+                    file_name=output_file_name,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                st.success(f"Generated file for Disponível: {disponivel}")
 
-except Exception as e:
-    print(f"An error occurred: {str(e)}")
+    except Exception as e:
+        st.error(f"An error occurred: {str(e)}")
+
+st.markdown("---")
+st.markdown("Built with Streamlit. Deployed via GitHub.")
