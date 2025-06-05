@@ -4,14 +4,19 @@ import pandas as pd
 import io
 import re
 from datetime import datetime
-from openpyxl import Workbook
-from openpyxl.styles import numbers
 
-# Attempt to import fuzzywuzzy
+# Attempt to import required modules
 try:
     from fuzzywuzzy import fuzz
 except ModuleNotFoundError:
     st.error("The 'fuzzywuzzy' module is not installed. Please ensure 'fuzzywuzzy' and 'python-Levenshtein' are included in your requirements.txt file.")
+    st.stop()
+
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import numbers
+except ModuleNotFoundError:
+    st.error("The 'openpyxl' module is not installed. Please ensure 'openpyxl' is included in your requirements.txt file.")
     st.stop()
 
 st.title("Economatos Excel Processor")
