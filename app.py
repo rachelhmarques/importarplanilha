@@ -1,186 +1,125 @@
-
 import streamlit as st
 import pandas as pd
 import io
 import re
 from datetime import datetime
+import pdfplumber # Você precisará instalar isso: pip install pdfplumber
+from ofxtools.Writer import OfxWriter # Você precisará instalar isso: pip install ofxtools
 
-# Attempt to import required modules
-fuzzy_available = False
-try:
-    from fuzzywuzzy import fuzz
-    fuzzy_available = True
-    st.info("Fuzzywuzzy module loaded successfully.")
-except ModuleNotFoundError:
-    st.warning("The 'fuzzywuzzy' module is not installed. Falling back to exact string matching for 'Detalhe' column. Ensure 'fuzzywuzzy' and 'python-Levenshtein' are in requirements.txt.")
+# ... (imports existentes e verificações de fuzzywuzzy/openpyxl) ...
 
-openpyxl_available = False
-try:
-    from openpyxl import Workbook
-    from openpyxl.styles import numbers
-    openpyxl_available = True
-    st.info("Openpyxl module loaded successfully.")
-except ModuleNotFoundError:
-    st.error("The 'openpyxl' module is not installed. Excel file generation will fail. Please ensure 'openpyxl' is included in your requirements.txt file.")
-
-st.title("Ajuste de Planilhas Conta Azul")
-st.markdown("Faça o upload do arquivo (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) para gerar os arquivos separados.")
+st.title("Ajuste de Planilhas e Extratos Bancários")
+st.markdown("Faça o upload do arquivo (`Economatos - planilha_Modelo_para_Importacao_do_Plano_de_categorias.xlsx`) ou do extrato PDF do Banco do Brasil para gerar os arquivos separados ou OFX.")
 
 # File uploader
-uploaded_file = st.file_uploader("Selecione o arquivo de Excel", type=["xlsx"])
+uploaded_file = st.file_uploader("Selecione o arquivo (Excel ou PDF)", type=["xlsx", "pdf"])
 
 if uploaded_file is not None:
-    if not openpyxl_available:
-        st.error("Cannot proceed without 'openpyxl'. Please install it and redeploy the app.")
-        st.stop()
+    if uploaded_file.type == "application/pdf":
+        try:
+            with st.spinner("Processando extrato PDF..."):
+                all_transactions = []
+                with pdfplumber.open(uploaded_file) as pdf:
+                    for page in pdf.pages:
+                        # Extrair tabelas (assumindo que as transações estão em tabelas)
+                        # Você pode precisar ajustar as configurações de extração de tabelas
+                        tables = page.extract_tables()
+                        for table in tables:
+                            # Exemplo: Análise básica baseada no trecho do PDF
+                            # Estrutura da linha: Dt. balancete, Dt. movimento, Ag. origem, Lote, Histórico, Valor R$, Documento, Saldo
+                            for row in table:
+                                if len(row) >= 7 and row[0] and row[5]: # Garantir que as colunas essenciais existam
+                                    dt_movimento = row[1]
+                                    historico = row[4]
+                                    valor_rs = row[5] # Isso precisa de análise cuidadosa para C/D e valor
 
-    try:
-        with st.spinner("Calma.....Reza uma Ave Maria!"):
-            # Read the uploaded Excel file
-            excel_data = pd.ExcelFile(uploaded_file)
+                                    # Limpeza básica da data (ex: "02/01/2025")
+                                    try:
+                                        transaction_date = datetime.strptime(dt_movimento.split(' ')[0], '%d/%m/%Y')
+                                    except ValueError:
+                                        continue # Pular se a data não puder ser analisada
 
-            # Load the sheets
-            base_df = pd.read_excel(excel_data, sheet_name='Planilha1', skiprows=8)
-            pagina1_df = pd.read_excel(excel_data, sheet_name='Página1', skiprows=4)
+                                    # Analisar valor e determinar o tipo de transação
+                                    amount_str = valor_rs.replace('.', '').replace(',', '.')
+                                    transaction_type = 'DEBIT'
+                                    if 'C' in amount_str:
+                                        transaction_type = 'CREDIT'
+                                        amount_str = amount_str.replace(' C', '')
+                                    elif 'D' in amount_str:
+                                        transaction_type = 'DEBIT'
+                                        amount_str = amount_str.replace(' D', '')
 
-            # Function to find the best match
-            def find_best_match(description, pagina1_descriptions):
-                if pd.isna(description):
-                    return None
-                if not fuzzy_available:
-                    # Fallback to exact matching
-                    clean_description = description.strip()
-                    for pagina1_desc in pagina1_descriptions:
-                        if pd.isna(pagina1_desc):
-                            continue
-                        clean_pagina1_desc = pagina1_desc.split(' - ', 1)[-1].strip() if ' - ' in pagina1_desc else pagina1_desc.strip()
-                        if clean_description.lower() == clean_pagina1_desc.lower():
-                            return pagina1_desc
-                    return None
-                # Fuzzy matching
-                best_match = None
-                highest_score = 0
-                clean_description = description.strip()
-                for pagina1_desc in pagina1_descriptions:
-                    if pd.isna(pagina1_desc):
-                        continue
-                    clean_pagina1_desc = pagina1_desc.split(' - ', 1)[-1].strip() if ' - ' in pagina1_desc else pagina1_desc.strip()
-                    score = fuzz.token_sort_ratio(clean_description, clean_pagina1_desc) if len(clean_description) > 20 or ',' in clean_description else fuzz.partial_ratio(clean_description, clean_pagina1_desc)
-                    threshold = 85 if len(clean_description) < 20 else 75
-                    if score > highest_score and score >= threshold:
-                        highest_score = score
-                        best_match = pagina1_desc
-                return best_match
+                                    try:
+                                        amount = float(amount_str)
+                                        if transaction_type == 'DEBIT':
+                                            amount = -amount # Débitos são negativos em OFX
+                                    except ValueError:
+                                        continue # Pular se o valor não puder ser analisado
 
-            # Ensure 'Detalhe' column exists
-            if 'Detalhe' not in base_df.columns:
-                st.error("Column 'Detalhe' not found in Planilha1")
-                st.stop()
+                                    all_transactions.append({
+                                        'date': transaction_date,
+                                        'type': transaction_type,
+                                        'amount': amount,
+                                        'memo': historico,
+                                        'fitid': f"{transaction_date.strftime('%Y%m%d')}-{abs(hash(historico + str(amount)))}" # ID único simples
+                                    })
+                if not all_transactions:
+                    st.warning("Nenhuma transação encontrada no PDF. Certifique-se de que o PDF contenha dados de tabela extraíveis.")
+                    st.stop()
 
-            # Use Column B (index 1) in Página1 for descriptions
-            if len(pagina1_df.columns) < 2:
-                st.error("Column B not found in Página1")
-                st.stop()
-            pagina1_descriptions = pagina1_df.iloc[:, 1]
-
-            # Filter out unwanted entries
-            unwanted = ['Transferência entre Disponíveis - Saída', 'Transferência entre Disponíveis - Entrada', 'Saldo Inicial']
-            base_df = base_df[~base_df['Detalhe'].isin(unwanted)]
-
-            # Process the 'Detalhe' column
-            updated_descriptions = base_df['Detalhe'].copy()
-            for i in range(len(base_df)):
-                desc = base_df['Detalhe'].iloc[i]
-                best_match = find_best_match(desc, pagina1_descriptions)
-                if best_match:
-                    updated_descriptions.iloc[i] = best_match
-
-            # Update the 'Detalhe' column
-            base_df['Detalhe'] = updated_descriptions
-
-            # Function to format dates to DD/MM/YYYY
-            def format_date(value):
-                if pd.isna(value):
-                    return value
-                try:
-                    date_val = pd.to_datetime(value, errors='coerce')
-                    if pd.isna(date_val):
-                        return value
-                    return date_val.strftime('%d/%m/%Y')
-                except (ValueError, TypeError):
-                    return value
-
-            # Get unique values in Column C (index 2, Disponível)
-            if len(base_df.columns) < 3:
-                st.error("Column C (Disponível) not found in Planilha1")
-                st.stop()
-            
-            disponivel_column = base_df.iloc[:, 2].fillna('')
-            unique_disponiveis = disponivel_column[disponivel_column.str.strip() != ''].unique()
-            st.write("Detected unique Disponíveis:", list(unique_disponiveis))
-
-            # Generate files for each unique Disponível
-            if len(unique_disponiveis) == 0:
-                st.warning("No valid Disponível values found in Column C.")
-                st.stop()
-
-            for disponivel in sorted(unique_disponiveis):
-                filtered_df = base_df[base_df.iloc[:, 2].fillna('') == disponivel]
-                
-                if filtered_df.empty:
-                    st.warning(f"No data found for Disponível: {disponivel}, skipping file generation")
-                    continue
-
-                # Create output DataFrame
-                output_df = pd.DataFrame({
-                    'Data de Competência': filtered_df.iloc[:, 1],
-                    'Data de Vencimento': filtered_df.iloc[:, 1],
-                    'Data de Pagamento': filtered_df.iloc[:, 1],
-                    'Valor': filtered_df.iloc[:, 9],
-                    'Categoria': filtered_df.iloc[:, 3],
-                    'Descrição': filtered_df.apply(lambda row: row.iloc[5] if not pd.isna(row.iloc[5]) else row['Detalhe'], axis=1),
-                    'Cliente/Fornecedor': None,
-                    'CNPJ/CPF Cliente/Fornecedor': None,
-                    'Centro de Custo': None,
-                    'Observações': None
-                })
-
-                # Format dates
-                for col in ['Data de Competência', 'Data de Vencimento', 'Data de Pagamento']:
-                    output_df[col] = output_df[col].apply(format_date)
-
-                # Sanitize filename
-                safe_disponivel = re.sub(r'[<>:"/\\|?*]', '_', str(disponivel))
-                output_file_name = f'{safe_disponivel}.xlsx'
-
-                # Save to BytesIO buffer
-                output_buffer = io.BytesIO()
-                with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-                    output_df.to_excel(writer, sheet_name='Dados', index=False)
-                    workbook = writer.book
-                    worksheet = writer.sheets['Dados']
-                    for col in ['A', 'B', 'C']:
-                        for row in range(2, len(output_df) + 2):
-                            cell = worksheet[f'{col}{row}']
-                            if cell.value and isinstance(cell.value, str) and '/' in cell.value:
-                                cell.number_format = 'DD/MM/YYYY'
-                            elif cell.value and isinstance(cell.value, (pd.Timestamp, datetime)):
-                                cell.value = cell.value.strftime('%d/%m/%Y')
-                                cell.number_format = 'DD/MM/YYYY'
-
-                output_buffer.seek(0)
-
-                # Provide download button
-                st.download_button(
-                    label=f"Download {output_file_name}",
-                    data=output_buffer,
-                    file_name=output_file_name,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                # Gerar OFX
+                writer = OfxWriter()
+                # Configurar cabeçalho OFX e informações da conta (substitua pelos detalhes reais do banco)
+                writer.new_profilemsg()
+                writer.new_signonmsg(
+                    fi_org='Banco do Brasil',
+                    fi_fid='1000', # ID FI fictício, encontre o real se possível
+                    gen_dt=datetime.now(),
+                    user_id='SEU_ID_DE_USUARIO', # Substitua pelo ID de usuário real
+                    user_key='SUA_CHAVE_DE_USUARIO' # Substitua pela chave de usuário real
                 )
-                st.success(f"Arquivo pronto: {disponivel}")
+                writer.new_bankmsg()
+                writer.new_stmttrnrs(
+                    curdef='BRL',
+                    bankid='001', # SWIFT/BIC do Banco do Brasil ou ID do banco
+                    acctid='31779-9', # Número da conta do PDF
+                    accttype='CHECKING', # Ou SAVINGS, etc.
+                    dtstart=min(t['date'] for t in all_transactions),
+                    dtend=max(t['date'] for t in all_transactions)
+                )
 
-    except Exception as e:
-        st.error(f"An error occurred: {str(e)}")
+                for t in all_transactions:
+                    writer.stmttrn(
+                        trntype=t['type'],
+                        dtposted=t['date'],
+                        trnamt=t['amount'],
+                        fitid=t['fitid'],
+                        memo=t['memo']
+                    )
+
+                ofx_data = writer.build()
+
+                ofx_output_buffer = io.BytesIO()
+                ofx_output_buffer.write(ofx_data)
+                ofx_output_buffer.seek(0)
+
+                st.download_button(
+                    label="Download Extrato OFX (Money 2000)",
+                    data=ofx_output_buffer,
+                    file_name="extrato_bb_money2000.ofx",
+                    mime="application/x-ofx" # Tipo MIME correto para OFX
+                )
+                st.success("Extrato OFX gerado com sucesso!")
+
+        except Exception as e:
+            st.error(f"Erro ao processar PDF: {str(e)}")
+
+    elif uploaded_file.type == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+        # ... (lógica existente de processamento de Excel) ...
+        if not openpyxl_available:
+            st.error("Não é possível prosseguir sem 'openpyxl'. Por favor, instale-o e implante o aplicativo novamente.")
+            st.stop()
+        # ... (resto do seu código existente de processamento de Excel) ...
 
 st.markdown("---")
 st.markdown("Deus é bom o tempo todo. O tempo todo Deus é bom!")
