@@ -36,6 +36,7 @@ transacoes_local.append({
 "nome": "",
 "memo": ""
 })
+
 return transacoes_local
 
 # Leitura do PDF
