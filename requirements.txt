@@ -1,5 +1,17 @@
+# Core dependencies - optimized for performance
 streamlit==1.39.0
 pandas==2.2.3
+
+# Fast fuzzy matching with optimized C extensions
 fuzzywuzzy==0.18.0
 python-Levenshtein==0.26.0
+
+# Excel processing - optimized version
 openpyxl==3.1.5
+
+# Additional performance optimizations
+numpy==1.26.4  # Vectorized operations
+pyarrow==17.0.0  # Fast DataFrame operations (optional but recommended)
+
+# Memory optimization
+psutil==6.0.0  # Memory monitoring (optional)
